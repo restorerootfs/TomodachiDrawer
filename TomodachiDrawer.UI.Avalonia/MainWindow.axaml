@@ -29,6 +29,7 @@
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Border Grid.Row="0" Classes="group" Margin="0,0,0,6">
                 <StackPanel Spacing="6">
@@ -97,40 +98,40 @@
                     <Button Content="Setup in game explanation"
                             HorizontalAlignment="Stretch"
                             Click="InGameSetupButton_Click" />
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0"
-                                x:Name="FlashFirmwareButton"
-                                IsEnabled="False"
-                                Content="Flash Base Firmware"
-                                HorizontalAlignment="Stretch"
-                                Margin="0,0,2,0"
-                                Click="FlashFirmwareButton_Click" />
-                        <Button Grid.Column="1"
-                                x:Name="ExportRP2040Button"
-                                IsEnabled="False"
-                                Content="Export To RP2040!"
-                                FontWeight="Bold"
-                                HorizontalAlignment="Stretch"
-                                Margin="2,0,0,0"
-                                Click="ExportRP2040Button_Click" />
-
-                    </Grid>
-                                            <Button
-                                x:Name="ExportUF2Button"
-                                IsEnabled="False"
-                                Content="Export to .UF2"
-                                FontWeight="Bold"
-                                HorizontalAlignment="Stretch"
-                                Margin="2,0,0,0"
-                                Click="ExportUF2Button_Click"
-                                />
+                    <Button 
+                        x:Name="FlashFirmwareButton"
+                        IsEnabled="False"
+                        Content="Flash Base Firmware"
+                        HorizontalAlignment="Stretch"
+                        Click="FlashFirmwareButton_Click" />
+                    
 
                 </StackPanel>
             </Border>
+            <Border Grid.Row="5" Classes="group">
+                <StackPanel Orientation="Horizontal" Margin="2,0,0,0">
+                    <ComboBox
+                        x:Name="ExportFormatComboBox"
+                        IsEnabled="True"
+                        MinWidth="160"
+                        SelectedIndex="0">
+                        <ComboBoxItem Content="Export to .UF2" />
+                        <ComboBoxItem Content="Export to RP2040" />
+                        <ComboBoxItem Content="Export to NUXBT Macro" />
+                        <ComboBoxItem Content="Export to TDLD File" />
+                    </ComboBox>
+
+                    <Button
+                        x:Name="ExportButton"
+                        IsEnabled="False"
+                        Content="Export"
+                        FontWeight="Bold"
+                        HorizontalAlignment="Stretch"
+                        Margin="4,0,0,0"
+                        Click="ExportButton_Click" />
+                </StackPanel>
+            </Border>
+            
         </Grid>
         <Border Grid.Column="1" Classes="group" Margin="0,0,6,0">
             <DockPanel>

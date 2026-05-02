@@ -361,3 +361,11 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# End of default gitignore
+
+## JetBrains IDE Specific
+.idea/
+!.idea/vcs.xml
+!.idea/runConfigurations/
+!.idea/indexLayout.xml

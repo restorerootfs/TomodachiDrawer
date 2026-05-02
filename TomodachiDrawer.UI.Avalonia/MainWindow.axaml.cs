@@ -64,7 +64,10 @@ public partial class MainWindow : Window
                     bool hasImage = !string.IsNullOrEmpty(_currentImagePath);
 
                     // ExportUF2 only needs an image — no RP2040 required
-                    ExportUF2Button.IsEnabled = hasImage;
+                    if (ExportFormatComboBox.SelectedIndex == 0)
+                    {
+                        ExportButton.IsEnabled = hasImage;
+                    }
 
                     if (path != null)
                     {
@@ -72,7 +75,10 @@ public partial class MainWindow : Window
                         RP2040StatusLabel.Foreground = Brushes.Green;
 
                         FlashFirmwareButton.IsEnabled = true;
-                        ExportRP2040Button.IsEnabled = hasImage;
+                        if (ExportFormatComboBox.SelectedIndex == 1)
+                        {
+                            ExportButton.IsEnabled = false;
+                        }
                         if (!lastState)
                         {
                             AppendLog($"RP2040 connected @ {path}");
@@ -85,7 +91,10 @@ public partial class MainWindow : Window
                         RP2040StatusLabel.Foreground = Brushes.Red;
 
                         FlashFirmwareButton.IsEnabled = false;
-                        ExportRP2040Button.IsEnabled = false;
+                        if (ExportFormatComboBox.SelectedIndex == 1)
+                        {
+                            ExportButton.IsEnabled = false;
+                        }
                         if (lastState)
                         {
                             AppendLog("RP2040 disconnected...");
@@ -134,7 +143,7 @@ public partial class MainWindow : Window
 
         _currentImagePath = path;
         ImagePathBox.Text = path;
-        ExportUF2Button.IsEnabled = true;
+        ExportButton.IsEnabled = true;
         UpdatePreview();
         AppendLog($"Loaded image: {Path.GetFileName(path)} ({img.Width}x{img.Height})");
     }
@@ -259,7 +268,7 @@ public partial class MainWindow : Window
         _ = ShowMessageAsync("TSP Solver Time Limit", message);
     }
 
-    private async void SaveTDLDButton_Click(object? sender, RoutedEventArgs e)
+    private async Task SaveTDLDButton_Click(object? sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_currentImagePath))
             return;
@@ -295,7 +304,7 @@ public partial class MainWindow : Window
 
         await Task.Run(async () =>
         {
-            var fileOutput = new FileControllerSink(outputPath);
+            var fileOutput = new TDLDControllerSink(outputPath);
             var drawer = new CanvasDrawer(fileOutput, AppendLog);
             drawer.ConnectAndConfirmController();
             await drawer.DrawImage(SKBitmap.Decode(imagePath), quantizer, denoiser, tspLimit);
@@ -307,7 +316,27 @@ public partial class MainWindow : Window
         AppendLog("Export complete.\r\n");
     }
 
-    private async void ExportRP2040Button_Click(object? sender, RoutedEventArgs e)
+    private async void ExportButton_Click(object sender, RoutedEventArgs e)
+    {
+        switch (ExportFormatComboBox.SelectedIndex)
+        {
+            case 0: // UF2
+                await ExportUF2Button_Click(sender, e);
+                break;
+            case 1: // RP2040
+                await ExportRP2040Button_Click(sender, e);
+                break;
+            case 2: // NUXBT
+                break; // TODO: Unimplemented 
+            case 3: // TDLD
+                await SaveTDLDButton_Click(sender, e);
+                break;
+        }
+    }
+
+  
+
+    private async Task ExportRP2040Button_Click(object? sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_currentImagePath))
             return;
@@ -317,7 +346,7 @@ public partial class MainWindow : Window
         var denoiser = DenoisingComboBox.SelectedItem?.ToString();
         var tspLimit = (float)(TSPTimeLimitUpDown.Value ?? 0.5m);
 
-        ExportRP2040Button.IsEnabled = false;
+        ExportButton.IsEnabled = false;
         TimeSpan totalTime = TimeSpan.MaxValue;
 
         await Task.Run(async () =>
@@ -335,7 +364,7 @@ public partial class MainWindow : Window
             await drawer.DrawImage(SKBitmap.Decode(imagePath), quantizer, denoiser, tspLimit, false);
             AppendLog($"True complete overall time is: {timingSink.TotalTime.TotalSeconds}s");
 
-            var fileSink = new FileControllerSink(tempPath);
+            var fileSink = new TDLDControllerSink(tempPath);
             timingSink.ReplayTo(fileSink);
             fileSink.Dispose();
 
@@ -356,13 +385,13 @@ public partial class MainWindow : Window
             totalTime = timingSink.TotalTime;
         });
 
-        ExportRP2040Button.IsEnabled = true;
+        ExportButton.IsEnabled = true;
 
         var estimateStr = $"{totalTime:h\\hm\\ms\\s}";
         DrawTimeLabel.Text = $"Draw Time Estimate: {estimateStr}";
     }
 
-    private async void ExportUF2Button_Click(object sender, RoutedEventArgs e)
+    private async Task ExportUF2Button_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_currentImagePath))
             return;
@@ -389,7 +418,7 @@ public partial class MainWindow : Window
         var denoiser = DenoisingComboBox.SelectedItem?.ToString();
         var tspLimit = (float)(TSPTimeLimitUpDown.Value ?? 0.5m);
 
-        ExportUF2Button.IsEnabled = false;
+        ExportButton.IsEnabled = false;
         TimeSpan totalTime = TimeSpan.MaxValue;
 
         await Task.Run(async () =>
@@ -407,7 +436,7 @@ public partial class MainWindow : Window
             await drawer.DrawImage(SKBitmap.Decode(imagePath), quantizer, denoiser, tspLimit, false);
             AppendLog($"True complete overall time is: {timingSink.TotalTime.TotalSeconds}s");
 
-            var fileSink = new FileControllerSink(tempPath);
+            var fileSink = new TDLDControllerSink(tempPath);
             timingSink.ReplayTo(fileSink);
             fileSink.Dispose();
 
@@ -425,7 +454,7 @@ public partial class MainWindow : Window
             totalTime = timingSink.TotalTime;
         });
 
-        ExportUF2Button.IsEnabled = true;
+        ExportButton.IsEnabled = true;
 
         var estimateStr = $"{totalTime:h\\hm\\ms\\s}";
         DrawTimeLabel.Text = $"Draw Time Estimate: {estimateStr}";

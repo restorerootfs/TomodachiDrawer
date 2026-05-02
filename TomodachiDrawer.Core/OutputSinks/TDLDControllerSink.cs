@@ -3,7 +3,7 @@ using TomodachiDrawer.Core.Interfaces;
 
 namespace TomodachiDrawer.Core.OutputSinks
 {
-    public class FileControllerSink : ISwitchOutput
+    public class TDLDControllerSink : ISwitchOutput
     {
         private const byte OpcodeDelayResolutionMs = 1;
 
@@ -41,7 +41,7 @@ namespace TomodachiDrawer.Core.OutputSinks
         private int _pendingRepeats;
         private const int MaxRleCount = 0xFFF; // 4095. Have to flsuh. This should realistically never be hit.
 
-        public FileControllerSink(string filePath)
+        public TDLDControllerSink(string filePath)
         {
             _writer = new BinaryWriter(File.Open(filePath, FileMode.Create));
 

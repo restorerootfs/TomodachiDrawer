@@ -195,7 +195,7 @@ namespace TomodachiDrawer.UI.Windows
 
                 await Task.Run(async () =>
                 {
-                    var fileOutput = new FileControllerSink(outputPath);
+                    var fileOutput = new TDLDControllerSink(outputPath);
                     var drawer = new CanvasDrawer(fileOutput, Log);
                     drawer.ConnectAndConfirmController();
                     await drawer.DrawImage(
@@ -419,7 +419,7 @@ The TSP solve is not used always, a simpler ""snaking"" algorithm is used if its
 
                 Log($"True complete overall time is: {timingSink.TotalTime.TotalSeconds}s");
                 // actually output now
-                var fileSink = new FileControllerSink(tempOutputName);
+                var fileSink = new TDLDControllerSink(tempOutputName);
                 timingSink.ReplayTo(fileSink);
                 fileSink.Dispose();
 

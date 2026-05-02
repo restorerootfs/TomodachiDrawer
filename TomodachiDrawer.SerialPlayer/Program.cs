@@ -74,24 +74,24 @@ namespace TomodachiDrawer.SerialPlayer
 
                     switch (opcode)
                     {
-                        case FileControllerSink.Opcode.Invalid:
+                        case TDLDControllerSink.Opcode.Invalid:
                             Console.WriteLine("Hit Invalid opcode, end of playback.");
                             return;
-                        case FileControllerSink.Opcode.Delay:
+                        case TDLDControllerSink.Opcode.Delay:
                             // 2-byte 12-bit record: nibble = high 4 bits, next byte = low 8 bits
                             int delayUnits = (nibble << 8) | reader.ReadByte();
                             controller.PreciseDelay(delayUnits * DelayResMs);
                             lastSingleByteRecord = null; // reset, we should never have a repeat after a delay.
                             break;
 
-                        case FileControllerSink.Opcode.SetStick:
+                        case TDLDControllerSink.Opcode.SetStick:
                             // 2-byte record: nibble = Stick axis, next byte = value
                             byte axisValue = reader.ReadByte();
                             controller.SetStick((Stick)nibble, axisValue);
                             lastSingleByteRecord = null; // see above
                             break;
 
-                        case FileControllerSink.Opcode.RepeatLast1:
+                        case TDLDControllerSink.Opcode.RepeatLast1:
                         {
                             if (lastSingleByteRecord is null)
                                 throw new Exception("repeatlast1 hit with no prior opcodes..?");
@@ -110,7 +110,7 @@ namespace TomodachiDrawer.SerialPlayer
                             break;
                         }
 
-                        case FileControllerSink.Opcode.RepeatLast2:
+                        case TDLDControllerSink.Opcode.RepeatLast2:
                         {
                             if (lastSingleByteRecord is null)
                                 throw new Exception("repeatlast2 hit with no prior opcodes..?");
@@ -151,25 +151,25 @@ namespace TomodachiDrawer.SerialPlayer
 
             switch (opcode)
             {
-                case FileControllerSink.Opcode.PressButton:
+                case TDLDControllerSink.Opcode.PressButton:
                     controller.Press((Button)nibble);
                     break;
-                case FileControllerSink.Opcode.ReleaseButton:
+                case TDLDControllerSink.Opcode.ReleaseButton:
                     controller.Release((Button)nibble);
                     break;
-                case FileControllerSink.Opcode.PressDPad:
+                case TDLDControllerSink.Opcode.PressDPad:
                     controller.Press((DPad)nibble);
                     break;
-                case FileControllerSink.Opcode.ReleaseDPad:
+                case TDLDControllerSink.Opcode.ReleaseDPad:
                     controller.Release((DPad)nibble);
                     break;
-                case FileControllerSink.Opcode.ReleaseAll:
+                case TDLDControllerSink.Opcode.ReleaseAll:
                     controller.ReleaseAll();
                     break;
-                case FileControllerSink.Opcode.TapButton:
+                case TDLDControllerSink.Opcode.TapButton:
                     controller.Tap((Button)nibble, TapHoldMs, TapReleaseMs);
                     break;
-                case FileControllerSink.Opcode.TapDPad:
+                case TDLDControllerSink.Opcode.TapDPad:
                     controller.Tap((DPad)nibble, TapHoldMs, TapReleaseMs);
                     break;
                 default:
