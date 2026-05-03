@@ -29,6 +29,28 @@ namespace TomodachiDrawer.Core
             _log = logger ?? Console.WriteLine;
         }
 
+        public static float GetRecommendedTSPSolveTime(int width, int height)
+        {
+            const int squared64 = 64 * 64;
+            const int squared128 = 128 * 128;
+            const int squared192 = 192 * 192;
+            const int squared256 = 256 * 256;
+
+            int pixels = width * height;
+            if (pixels <= squared64)
+                return 0.5f;
+            else if (pixels <= squared128)
+                return 1.25f;
+            else if (pixels <= squared192)
+                return 2.5f;
+            else if (pixels <= squared256)
+                return 3.5f;
+            else
+            {
+                return 5.0f; // should ever reach here...
+            }
+        }
+
         public async Task DrawImage(
             SKBitmap image,
             string quantizerName,
