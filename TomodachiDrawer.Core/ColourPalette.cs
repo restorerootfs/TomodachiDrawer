@@ -16,6 +16,11 @@ namespace TomodachiDrawer.Core
         private const int HotbarSlots = 9;
         private const int HotbarHeaderRows = 2; // Used for homing.
 
+        // Full colour range.
+        private const int FCR_HUE_SLIDER_STEP_COUNT = 201;
+        private const int FCR_SATURATION_STEP_COUNT = 213;
+        private const int FCR_VALUE_STEP_COUNT = 112;
+
         // In game stuff, relevant to current draw session.
         // Used to track where our last colour was, so we can minimize inputs to change palette.
         private int _lastGridX = 0; // The first hotbar slot is by default black
@@ -145,65 +150,105 @@ namespace TomodachiDrawer.Core
         // ran through the IImageQuantizer of their choosing.
         public SKBitmap PreviewColourMapping(
             SKBitmap source,
-            string quantizerName,
+            QuantizerSettings quantizerSettings,
             string? denoiserName
         )
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(quantizerName);
+            ArgumentException.ThrowIfNullOrWhiteSpace(quantizerSettings.quantizerName);
             ArgumentNullException.ThrowIfNull(source);
-            var quantizer = Quantizers[quantizerName](Colours);
-            var result = new SKBitmap(source.Width, source.Height);
 
             var trueSource = source;
-
             if (!string.IsNullOrEmpty(denoiserName))
             {
                 trueSource = ImageDenoiser.DenoiseImage(source, denoiserName);
             }
 
-            // TODO: GetPixel is slow
-            for (int x = 0; x < trueSource.Width; x++)
+            var quantized = QuantizeImage(trueSource, quantizerSettings);
+
+            // make a bitmap out of it
+            var output = new SKBitmap(source.Width, source.Height);
+            for (int x = 0; x < quantized.GetLength(0); x++)
             {
-                for (int y = 0; y < trueSource.Height; y++)
+                for (int y = 0; y < quantized.GetLength(1); y++)
                 {
-                    var before = trueSource.GetPixel(x, y);
-                    if (before.Alpha < 128)
+                    var paletteColour = quantized[x, y];
+                    if (paletteColour != null)
                     {
-                        result.SetPixel(x, y, new SKColor(0, 0, 0, 0));
-                        continue;
+                        output.SetPixel(x, y, paletteColour.skColor);
                     }
-                    var after = quantizer.FindClosestColour(before.Red, before.Green, before.Blue);
-                    result.SetPixel(x, y, after.skColor);
                 }
             }
-            return result;
+
+            return output;
         }
 
         /// <summary>Map an image to PaletteColours</summary>
         /// <returns>2D array of PaletteColour? [x, y] of the appropriate colours.</returns>
-        public PaletteColour?[,] QuantizeImage(SKBitmap source, string quantizerName)
+        public PaletteColour?[,] QuantizeImage(SKBitmap source, QuantizerSettings quantizerSettings)
         {
-            var quantizer = Quantizers[quantizerName](Colours);
-            var result = new PaletteColour?[source.Width, source.Height];
+            int width = source.Width,
+                height = source.Height;
 
-            // TODO: GetPixel is slow
-            for (int x = 0; x < source.Width; x++)
+            if (quantizerSettings.quantizerName == "Arbitrary")
             {
-                for (int y = 0; y < source.Height; y++)
-                {
-                    var pixel = source.GetPixel(x, y);
-                    if (pixel.Alpha <= 128)
-                        result[x, y] = null;
-                    else
-                        result[x, y] = quantizer.FindClosestColour(
-                            pixel.Red,
-                            pixel.Green,
-                            pixel.Blue
-                        );
-                }
-            }
+                if (quantizerSettings.colourCount == null)
+                    throw new ArgumentNullException(
+                        nameof(quantizerSettings.colourCount),
+                        "colourCount must be set for Arbitrary quantizer"
+                    );
 
-            return result;
+                SKBitmap quantized = ArbitraryColourQuantizer.Quantize(
+                    source,
+                    (int)quantizerSettings.colourCount,
+                    quantizerSettings.useDithering ?? default
+                );
+                SKColor[] pixels = quantized.Pixels;
+
+                var skToPalette = pixels
+                    .Where(c => c.Alpha > 128)
+                    .Distinct()
+                    .ToDictionary(
+                        d => d,
+                        d => new PaletteColour(
+                            $"({d.Red}, {d.Green}, {d.Blue})",
+                            d.Red,
+                            d.Green,
+                            d.Blue,
+                            null,
+                            null,
+                            d,
+                            true
+                        )
+                    );
+
+                var output = new PaletteColour?[width, height];
+                for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                {
+                    var pixel = pixels[y * width + x];
+                    output[x, y] = pixel.Alpha > 128 ? skToPalette[pixel] : null;
+                }
+
+                return output;
+            }
+            else
+            {
+                var quantizer = Quantizers[quantizerSettings.quantizerName](Colours);
+                SKColor[] pixels = source.Pixels;
+
+                var result = new PaletteColour?[width, height];
+                for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                {
+                    var pixel = pixels[y * width + x];
+                    result[x, y] =
+                        pixel.Alpha > 128
+                            ? quantizer.FindClosestColour(pixel.Red, pixel.Green, pixel.Blue)
+                            : null;
+                }
+
+                return result;
+            }
         }
 
         /// <summary>Creates the ColourLayers for each colour in a quantized image. Puts all pixels into FineDetailPoints for solving later</summary>
@@ -247,6 +292,8 @@ namespace TomodachiDrawer.Core
             return outputLayers;
         }
 
+        private bool _lastWasArbitrary = false;
+
         public void SelectColour(PaletteColour target, double speed)
         {
             _output.Tap(Button.Y, speed, speed);
@@ -268,24 +315,132 @@ namespace TomodachiDrawer.Core
             _output.Tap(Button.Y, speed, speed);
             _output.Delay(300);
 
-            // Move to right spot, from the
-            int deltaX = target.GridX - _lastGridX;
-            int deltaY = target.GridY - _lastGridY;
+            // Now in the colour menu. What tab? Shrug!
+            if (!target.IsArbitrary && target.GridX != null && target.GridY != null)
+            {
+                // Move to right spot, from the
+                int deltaX = (int)target.GridX - _lastGridX;
+                int deltaY = (int)target.GridY - _lastGridY;
 
-            // TODO: Optimize with diagonals.
-            DPad YDirection = deltaY > 0 ? DPad.DOWN : DPad.UP;
-            DPad XDirection = deltaX > 0 ? DPad.RIGHT : DPad.LEFT;
-            for (int i = 0; i < Math.Abs(deltaY); i++)
-                _output.Tap(YDirection, speed, speed);
-            for (int i = 0; i < Math.Abs(deltaX); i++)
-                _output.Tap(XDirection, speed, speed);
+                // TODO: Optimize with diagonals.
+                DPad YDirection = deltaY > 0 ? DPad.DOWN : DPad.UP;
+                DPad XDirection = deltaX > 0 ? DPad.RIGHT : DPad.LEFT;
+                for (int i = 0; i < Math.Abs(deltaY); i++)
+                    _output.Tap(YDirection, speed, speed);
+                for (int i = 0; i < Math.Abs(deltaX); i++)
+                    _output.Tap(XDirection, speed, speed);
 
-            // confirm and close out
-            _output.Tap(Button.A, speed, speed);
-            _output.Delay(300);
+                // confirm and close out
+                _output.Tap(Button.A, speed, speed);
+                _output.Delay(300);
 
-            _lastGridX = target.GridX;
-            _lastGridY = target.GridY;
+                _lastGridX = (int)target.GridX;
+                _lastGridY = (int)target.GridY;
+            }
+            else
+            {
+                if (!_lastWasArbitrary)
+                {
+                    _output.Tap(Button.R);
+                }
+
+                // TLDR: The RGB needs to be Linearized from sRGB then turned to HSV.
+                // This seemingly is a 1:1 match.
+                float linR = ToLinear(target.skColor.Red);
+                float linG = ToLinear(target.skColor.Green);
+                float linB = ToLinear(target.skColor.Blue);
+
+                LinearRgbToHsv(linR, linG, linB, out float h, out float s, out float v);
+
+                // Figure out the steps first off
+                int hueSteps = (int)
+                    Math.Round((1.0f - h / 360.0f) * (FCR_HUE_SLIDER_STEP_COUNT - 1));
+                int satSteps = (int)Math.Round((1.0f - s) * (FCR_SATURATION_STEP_COUNT - 1));
+                int valSteps = (int)Math.Round((1.0f - v) * (FCR_VALUE_STEP_COUNT - 1));
+
+                // Determine which way we home for shorter travel.
+                // If we are past the halfway point, use the opposite side.
+                bool hueHomeLeft = hueSteps <= (FCR_HUE_SLIDER_STEP_COUNT - 1) / 2;
+                bool satHomeRight = satSteps <= (FCR_SATURATION_STEP_COUNT - 1) / 2;
+                bool valHomeTop = valSteps <= (FCR_VALUE_STEP_COUNT - 1) / 2;
+
+                // Use stick for quicker homing
+                _output.SetStick(Stick.LX, satHomeRight ? (byte)255 : (byte)0);
+                _output.SetStick(Stick.LY, valHomeTop ? (byte)0 : (byte)255);
+                _output.Press(hueHomeLeft ? Button.ZL : Button.ZR); // Home by holding
+                _output.Delay(4250); // This delay is pretty much as low as it can be for handling the worst case (black)
+                _output.ReleaseAll();
+
+                // TODO: Hue inputs could be entered at the same time as sat/val (although sat/val can only be one of those at a time, no diagonals)
+                // This would require something like
+                // _output.Press(ZR);
+                // _output.Press(DPad.LEFT);
+                // _output.Delay(25);
+                // _output.Release(ZR);
+                // _output.Release(DPad.LEFT);
+                // _output.Delay(25);
+                // to avoid the inherent delays of .Tap, this would negate compression savings of .Tap
+                // but for colour selection it would be fairly insignificant.
+                int hueInputs = hueHomeLeft ? hueSteps : (FCR_HUE_SLIDER_STEP_COUNT - 1) - hueSteps;
+                Button hueTapDirection = hueHomeLeft ? Button.ZR : Button.ZL;
+
+                int satInputs = satHomeRight
+                    ? satSteps
+                    : (FCR_SATURATION_STEP_COUNT - 1) - satSteps;
+                DPad satDirection = satHomeRight ? DPad.LEFT : DPad.RIGHT;
+
+                int valInputs = valHomeTop ? valSteps : (FCR_VALUE_STEP_COUNT - 1) - valSteps;
+                DPad valDirection = valHomeTop ? DPad.DOWN : DPad.UP;
+
+                for (int i = 0; i < hueInputs; i++)
+                    _output.Tap(hueTapDirection);
+
+                for (int i = 0; i < satInputs; i++)
+                    _output.Tap(satDirection);
+
+                for (int i = 0; i < valInputs; i++)
+                    _output.Tap(valDirection);
+
+                _output.Tap(Button.A);
+                _output.Delay(300); // wait for ui to close.
+            }
+        }
+
+        private static float ToLinear(byte srgb8)
+        {
+            float c = srgb8 / 255.0f;
+            if (c <= 0.04045f)
+                return c / 12.92f;
+            return MathF.Pow((c + 0.055f) / 1.055f, 2.4f);
+        }
+
+        private static void LinearRgbToHsv(
+            float r,
+            float g,
+            float b,
+            out float h,
+            out float s,
+            out float v
+        )
+        {
+            float min = Math.Min(r, Math.Min(g, b));
+            float max = Math.Max(r, Math.Max(g, b));
+            float delta = max - min;
+
+            v = max;
+            s = max == 0 ? 0 : delta / max;
+
+            if (delta == 0)
+                h = 0;
+            else if (max == r)
+                h = 60 * (((g - b) / delta) % 6);
+            else if (max == g)
+                h = 60 * (((b - r) / delta) + 2);
+            else
+                h = 60 * (((r - g) / delta) + 4);
+
+            if (h < 0)
+                h += 360;
         }
     }
 }

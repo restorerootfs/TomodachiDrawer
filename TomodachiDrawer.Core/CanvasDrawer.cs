@@ -2,6 +2,7 @@
 using Google.OrTools.ConstraintSolver;
 using SkiaSharp;
 using TomodachiDrawer.Core.ImageProcessing.Denoising;
+using TomodachiDrawer.Core.ImageProcessing.Quantizers;
 using TomodachiDrawer.Core.Interfaces;
 using TomodachiDrawer.Core.Models;
 using TomodachiDrawer.Core.OutputSinks;
@@ -53,7 +54,7 @@ namespace TomodachiDrawer.Core
 
         public async Task DrawImage(
             SKBitmap image,
-            string quantizerName,
+            QuantizerSettings quantizerSettings,
             string? denoiserName = null,
             float tspTimeLimit = 1.0f,
             bool disableLargeBrush = false
@@ -87,7 +88,7 @@ namespace TomodachiDrawer.Core
             }
 
             // Quantized Map is a 2D array of PaletteColours.
-            var quantizedMap = _palette.QuantizeImage(image, quantizerName);
+            var quantizedMap = _palette.QuantizeImage(image, quantizerSettings);
 
             // First off we are just putting all the individual details into the fine detail pass,
             // following passes will start to remove from that and add to the stamp passes.
@@ -135,7 +136,13 @@ namespace TomodachiDrawer.Core
                         // todo TSP routing lol
 
                         var dumbRoute = new List<CanvasPoint>(sbs.Value);
-                        var optimizedRoute = PerformTSP(dumbRoute, 0.5f); // half a sec per stamp size per colour is prob reasonable?
+                        var pointCount = dumbRoute.Count;
+                        float tspTime = 0.5f;
+                        if (pointCount > 100)
+                            tspTime = 1.0f;
+                        else if (pointCount > 200)
+                            tspTime = 1.5f;
+                        var optimizedRoute = PerformTSP(dumbRoute, tspTime); // half a sec per stamp size per colour is prob reasonable?
                         if (optimizedRoute == null)
                             optimizedRoute = dumbRoute;
 
@@ -689,11 +696,11 @@ namespace TomodachiDrawer.Core
         public void ConnectAndConfirmController()
         {
             _realOutput.Tap(Button.A);
-            _realOutput.Delay(1000);
-            _realOutput.Tap(Button.A);
-            _realOutput.Delay(500);
+            _realOutput.Delay(1750); // raised from 1000ms to 1750 for switch 1
             _realOutput.Tap(Button.A, 500);
-            _realOutput.Delay(1500);
+            _realOutput.Delay(750); // raised from 500ms to 750ms for switch 1
+            _realOutput.Tap(Button.A, 750);
+            _realOutput.Delay(2000); // raised from 1500 to 2000 for switch 1
         }
     }
 }

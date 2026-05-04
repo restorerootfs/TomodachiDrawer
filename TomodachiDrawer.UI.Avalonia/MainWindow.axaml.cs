@@ -6,11 +6,13 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using SkiaSharp;
 using TomodachiDrawer.Core;
 using TomodachiDrawer.Core.ImageProcessing;
 using TomodachiDrawer.Core.ImageProcessing.Denoising;
+using TomodachiDrawer.Core.ImageProcessing.Quantizers;
 using TomodachiDrawer.Core.OutputSinks;
 using Button = Avalonia.Controls.Button; // conflict with the Button enum in SinkEnums
 
@@ -26,8 +28,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        ColorMatcherComboBox.ItemsSource = ColourPalette.Quantizers.Keys.ToList();
-        ColorMatcherComboBox.SelectedIndex = 0;
+        var quantizers = ColourPalette.Quantizers.Keys.ToList();
+        quantizers.Insert(0, "Arbitrary");
+        ColourMatcherComboBox.ItemsSource = quantizers;
+        ColourMatcherComboBox.SelectedIndex = 0;
 
         var denoiserSelection = new List<string> { "None" };
         denoiserSelection.AddRange(ImageDenoiser.Denoisers.Keys);
@@ -134,19 +138,37 @@ public partial class MainWindow : Window
 
         if (img.Width > 256 || img.Height > 256)
         {
-            _ = ShowMessageAsync(
-                "Image too big",
-                $"{Path.GetFileName(path)} is too big! Max of 256x256."
+            float scale = Math.Min(256f / img.Width, 256f / img.Height);
+            int newWidth = (int)(img.Width * scale);
+            int newHeight = (int)(img.Height * scale);
+
+            var resized = img.Resize(
+                new SKImageInfo(newWidth, newHeight),
+                new SKSamplingOptions(SKCubicResampler.CatmullRom)
             );
-            return;
+            img.Dispose();
+            img = resized;
+
+            string tempPath = Path.Combine(
+                Path.GetTempPath(),
+                $"tomodachi_{Path.GetFileName(path)}"
+            );
+            using var data = SKImage.FromBitmap(img).Encode(SKEncodedImageFormat.Png, 100);
+            using var stream = File.OpenWrite(tempPath);
+            data.SaveTo(stream);
+
+            path = tempPath;
+            AppendLog($"Image resized to {newWidth}x{newHeight}, saved to temp: {tempPath}");
         }
 
         _currentImagePath = path;
         ImagePathBox.Text = path;
         ExportButton.IsEnabled = true;
         UpdatePreview();
-        TSPTimeLimitUpDown.Value = (decimal)CanvasDrawer.GetRecommendedTSPSolveTime(img.Width, img.Height);
+        TSPTimeLimitUpDown.Value = (decimal)
+            CanvasDrawer.GetRecommendedTSPSolveTime(img.Width, img.Height);
         AppendLog($"Loaded image: {Path.GetFileName(path)} ({img.Width}x{img.Height})");
+        img.Dispose();
     }
 
     private void UpdatePreview()
@@ -157,19 +179,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        var quantizer = ColorMatcherComboBox.SelectedItem?.ToString();
-        if (quantizer == null)
-            return;
-
         var pal = new ColourPalette(new DummySink());
         var denoiser = DenoisingComboBox.SelectedItem?.ToString();
+        var quantizerSettings = GetQuantizerSettings();
         var preview = pal.PreviewColourMapping(
             SKBitmap.Decode(_currentImagePath),
-            quantizer,
+            quantizerSettings,
             denoiser
         );
         PreviewImage.Source = ToAvaloniaBitmap(preview);
-        AppendLog($"Updated preview for {Path.GetFileName(_currentImagePath)} using {quantizer}");
+        AppendLog(
+            $"Updated preview for {Path.GetFileName(_currentImagePath)} using {quantizerSettings.quantizerName}"
+        );
     }
 
     private static Bitmap? ToAvaloniaBitmap(SKBitmap skBitmap)
@@ -249,10 +270,12 @@ public partial class MainWindow : Window
             LoadImage(files[0].TryGetLocalPath() ?? "");
     }
 
-    private void ColorMatcherComboBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    private void ColourMatcherComboBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (!string.IsNullOrEmpty(_currentImagePath))
             UpdatePreview();
+        ColourLimitUpDown.IsEnabled =
+            ColourMatcherComboBox?.SelectedValue?.ToString() == "Arbitrary";
     }
 
     private void TSPHelpButton_Click(object? sender, RoutedEventArgs e)
@@ -267,6 +290,17 @@ public partial class MainWindow : Window
             + "The TSP solve is not used always, a simpler \"snaking\" algorithm is used if its quicker, or if TSP didnt find anything in time, which it sometimes is, mostly for large continuous areas of colour.";
 
         _ = ShowMessageAsync("TSP Solver Time Limit", message);
+    }
+
+    private QuantizerSettings GetQuantizerSettings()
+    {
+        string quantizerName = ColourMatcherComboBox.SelectedItem!.ToString()!;
+        if (quantizerName == "Arbitrary")
+        {
+            var colourCount = (int)(ColourLimitUpDown.Value ?? 32);
+            return new QuantizerSettings(quantizerName, colourCount, default);
+        }
+        return new QuantizerSettings(quantizerName, default, default);
     }
 
     private async Task SaveTDLDButton_Click(object? sender, RoutedEventArgs e)
@@ -295,7 +329,6 @@ public partial class MainWindow : Window
             return;
 
         var imagePath = _currentImagePath;
-        var quantizer = ColorMatcherComboBox.SelectedItem!.ToString()!;
         var denoiser = DenoisingComboBox.SelectedItem?.ToString();
         var tspLimit = (float)(TSPTimeLimitUpDown.Value ?? 0.5m);
 
@@ -303,12 +336,14 @@ public partial class MainWindow : Window
             btn.IsEnabled = false;
         AppendLog("Starting export...\r\n");
 
+        var settings = GetQuantizerSettings();
+
         await Task.Run(async () =>
         {
             var fileOutput = new TDLDControllerSink(outputPath);
             var drawer = new CanvasDrawer(fileOutput, AppendLog);
             drawer.ConnectAndConfirmController();
-            await drawer.DrawImage(SKBitmap.Decode(imagePath), quantizer, denoiser, tspLimit);
+            await drawer.DrawImage(SKBitmap.Decode(imagePath), settings, denoiser, tspLimit);
             fileOutput.Dispose();
         });
 
@@ -343,12 +378,12 @@ public partial class MainWindow : Window
             return;
 
         var imagePath = _currentImagePath;
-        var quantizer = ColorMatcherComboBox.SelectedItem!.ToString()!;
         var denoiser = DenoisingComboBox.SelectedItem?.ToString();
         var tspLimit = (float)(TSPTimeLimitUpDown.Value ?? 0.5m);
 
         ExportButton.IsEnabled = false;
         TimeSpan totalTime = TimeSpan.MaxValue;
+        var settings = GetQuantizerSettings();
 
         await Task.Run(async () =>
         {
@@ -362,7 +397,7 @@ public partial class MainWindow : Window
             var drawer = new CanvasDrawer(timingSink, AppendLog);
             drawer.ConnectAndConfirmController();
             AppendLog("Starting to generate inputs...");
-            await drawer.DrawImage(SKBitmap.Decode(imagePath), quantizer, denoiser, tspLimit, false);
+            await drawer.DrawImage(SKBitmap.Decode(imagePath), settings, denoiser, tspLimit, false);
             AppendLog($"True complete overall time is: {timingSink.TotalTime.TotalSeconds}s");
 
             var fileSink = new TDLDControllerSink(tempPath);
@@ -415,12 +450,12 @@ public partial class MainWindow : Window
             return;
 
         var imagePath = _currentImagePath;
-        var quantizer = ColorMatcherComboBox.SelectedItem!.ToString()!;
         var denoiser = DenoisingComboBox.SelectedItem?.ToString();
         var tspLimit = (float)(TSPTimeLimitUpDown.Value ?? 0.5m);
 
         ExportButton.IsEnabled = false;
         TimeSpan totalTime = TimeSpan.MaxValue;
+        var settings = GetQuantizerSettings();
 
         await Task.Run(async () =>
         {
@@ -434,7 +469,7 @@ public partial class MainWindow : Window
             var drawer = new CanvasDrawer(timingSink, AppendLog);
             drawer.ConnectAndConfirmController();
             AppendLog("Starting to generate inputs...");
-            await drawer.DrawImage(SKBitmap.Decode(imagePath), quantizer, denoiser, tspLimit, false);
+            await drawer.DrawImage(SKBitmap.Decode(imagePath), settings, denoiser, tspLimit, false);
             AppendLog($"True complete overall time is: {timingSink.TotalTime.TotalSeconds}s");
 
             var fileSink = new TDLDControllerSink(tempPath);
@@ -533,7 +568,7 @@ public partial class MainWindow : Window
                 + "- Set your cursor to the TOP LEFT of where you want the drawing to be.\r\n"
                 + "- Ensure the full area of the canvas that will be drawn is on screen.\r\n\r\n"
                 + "If the canvas is zoomed in, it will cause the cursor to desync as the canvas moves when the cursor gets on the edges. Zooming out fully avoids this.\r\n\r\n"
-                + "If your image is 256x256, set it all the way in the top left. If your image is smaller, set your cursor to where you want the topleft most pixel of your drawing to be."
+                + "If your image is 256x256 or larger, set it all the way in the top left. If your image is smaller, set your cursor to where you want the topleft most pixel of your drawing to be."
         );
     }
 
@@ -554,5 +589,42 @@ public partial class MainWindow : Window
         var first = e.DataTransfer.TryGetFiles()?.FirstOrDefault();
         if (first != null)
             LoadImage(first.TryGetLocalPath() ?? "");
+    }
+
+    private void ColourLimitUpDown_ValueChanged(
+        object? sender,
+        NumericUpDownValueChangedEventArgs e
+    ) => UpdatePreview();
+
+    private void AppThemeComboBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        // Why does avalonia call this before AppThemeComboBox exists?? lol
+        if (AppThemeComboBox == null)
+            return;
+        var desiredTheme = AppThemeComboBox.SelectedIndex switch
+        {
+            1 => ThemeVariant.Light,
+            2 => ThemeVariant.Dark,
+            _ => ThemeVariant.Default,
+        };
+
+        if (Application.Current is { } app)
+        {
+            app.RequestedThemeVariant = desiredTheme;
+        }
+    }
+
+    private void ColourMatcherHelpButton_Click(object? sender, RoutedEventArgs e)
+    {
+        _ = ShowMessageAsync(
+            "Colour Matchers",
+            "You have 4 options for colour matchers."
+                + "\nEuclidean, Redmean, and CieLab work using the Pro modes default palette."
+                + "\n\nArbitrary on the other hands works using the full colour range, selecting colours in-game is slower but you can achieve much better results."
+                + "\nYou can tweak the number of colours it has by changing the value to the right of this button."
+                + "\nTry and pick the lowest number that looks good to your standards to minimize draw time."
+                + "\nLess colours means quicker drawing, and more opportunities for the solver to find large continous blocks it can draw quickly."
+                + "\nIf time is of the essence, you can also enable Denoising which can increase the number of large spots for the larger brushes."
+        );
     }
 }
